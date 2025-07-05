@@ -31,7 +31,7 @@ const Weather = () => {
 
   const search = async (city) => {
     if (city.trim() === "") {
-      alert("Ingrese el nombre de una ciudad");
+      alert("Ingresar la Ciudad a Buscar");
       return;
     }
     try {
