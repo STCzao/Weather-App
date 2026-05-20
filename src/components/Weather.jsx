@@ -11,53 +11,79 @@ import wind_icon from "../assets/wind.png";
 
 const Weather = () => {
   const inputRef = useRef();
-  const [weatherData, setWeatherData] = useState(false);
+  const [weatherData, setWeatherData] = useState(null);
 
   const allIcons = {
-    "01d": clear_icon,
-    "01n": clear_icon,
-    "02d": cloud_icon,
-    "02n": cloud_icon,
-    "03d": cloud_icon,
-    "04d": drizzle_icon,
-    "04n": drizzle_icon,
-    "09d": rain_icon,
-    "09n": rain_icon,
-    "10d": rain_icon,
-    "10n": rain_icon,
-    "13d": snow_icon,
-    "13n": snow_icon,
+    clear: clear_icon,
+    cloud: cloud_icon,
+    drizzle: drizzle_icon,
+    rain: rain_icon,
+    snow: snow_icon,
+  };
+
+  const getIconFromCode = (code) => {
+    // Open-Meteo weathercode mapping
+    // 0: Clear, 1-3: Mainly clear to overcast, 45-48: Fog, 51-67: Drizzle/Rain, 71-77: Snow, 80-82: Rain showers, 95-99: Thunderstorm
+    if (code === 0) return allIcons.clear;
+    if (code >= 1 && code <= 3) return allIcons.cloud;
+    if (code === 45 || code === 48) return allIcons.drizzle;
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || (code >= 95 && code <= 99)) return allIcons.rain;
+    if (code >= 71 && code <= 77) return allIcons.snow;
+    return allIcons.clear;
   };
 
   const search = async (city) => {
-    if (city.trim() === "") {
+    if (!city || city.trim() === "") {
       alert("Ingresar la Ciudad a Buscar");
       return;
     }
+
     try {
-      const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${
-        import.meta.env.VITE_APP_ID
-      }`;
-
-      const response = await fetch(url);
-      const data = await response.json();
-
-      if (!response.ok) {
-        alert(data.message);
+      // 1) Geocoding using Open-Meteo geocoding API (no key required)
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+        city
+      )}&count=1`;
+      const geoRes = await fetch(geoUrl);
+      const geoData = await geoRes.json();
+      if (!geoRes.ok || !geoData.results || geoData.results.length === 0) {
+        alert('Ciudad no encontrada');
+        setWeatherData(null);
         return;
       }
 
-      const icon = allIcons[data.weather[0].icon] || clear_icon;
+      const place = geoData.results[0];
+      const { latitude, longitude, name, country } = place;
+
+      // 2) Current weather from Open-Meteo. Request hourly humidity to get current humidity value.
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=relativehumidity_2m&temperature_unit=celsius&windspeed_unit=kmh&timezone=auto`;
+      const weatherRes = await fetch(weatherUrl);
+      const weatherDataRaw = await weatherRes.json();
+      if (!weatherRes.ok || !weatherDataRaw.current_weather) {
+        alert('No se pudieron obtener datos meteorológicos');
+        setWeatherData(null);
+        return;
+      }
+
+      const cw = weatherDataRaw.current_weather;
+      // find current humidity from hourly arrays by matching time
+      let humidity = null;
+      if (weatherDataRaw.hourly && weatherDataRaw.hourly.time && weatherDataRaw.hourly.relativehumidity_2m) {
+        const idx = weatherDataRaw.hourly.time.indexOf(cw.time);
+        if (idx !== -1) humidity = weatherDataRaw.hourly.relativehumidity_2m[idx];
+      }
+
+      const icon = getIconFromCode(cw.weathercode);
       setWeatherData({
-        humidity: data.main.humidity,
-        windSpeed: data.wind.speed,
-        temperature: Math.floor(data.main.temp),
-        location: data.name,
+        humidity: humidity !== null ? humidity : 'N/A',
+        windSpeed: cw.windspeed,
+        temperature: Math.round(cw.temperature),
+        location: `${name}${country ? ', ' + country : ''}`,
         icon: icon,
       });
     } catch (error) {
-      setWeatherData(false);
-      console.error("Error");
+      setWeatherData(null);
+      console.error(error);
+      alert('Error al consultar el servicio. Revisa la consola para más detalles.');
     }
   };
 
@@ -103,7 +129,12 @@ const Weather = () => {
           </div>
         </>
       ) : (
-        <></>
+        <div className="no-data">
+          <p>No hay datos disponibles.</p>
+          {!import.meta.env.VITE_APP_ID && (
+            <p className="hint">Configura `VITE_APP_ID` en un `.env`.</p>
+          )}
+        </div>
       )}
     </div>
   );
